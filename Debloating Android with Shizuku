@@ -1,0 +1,320 @@
+# Debloating a Samsung without root
+
+Locked bootloader, no PC, no Magisk. Works on any Android 11+ device but the
+package lists here are Samsung-specific. I did this on a Z Fold 8.
+
+Takes about half an hour.
+
+## Contents
+
+- [Before you start](#before-you-start)
+- [1. Repos](#1-repos)
+- [2. Shizuku](#2-shizuku)
+- [3. Wireless debugging](#3-wireless-debugging)
+- [4. Pairing](#4-pairing)
+- [5. Shell app](#5-shell-app)
+- [6. Verify](#6-verify)
+- [7. The user 150 error](#7-the-user-150-error)
+- [8. Canta](#8-canta)
+- [9. What to remove](#9-what-to-remove)
+- [10. Cleanup](#10-cleanup)
+- [FAQ](#faq)
+- [Commands](#commands)
+
+## Before you start
+
+Samsung killed OEM unlocking. If a guide tells you to flip that switch in
+developer options, it's out of date. No root, no custom recovery, no
+NetHunter Lite.
+
+You can still get the ADB shell, which is uid 2000 — above normal apps, below
+root. Shizuku runs it on-device instead of over a cable.
+
+That's enough to uninstall system apps, revoke permissions the settings UI
+hides, and change hidden settings. It's not enough for monitor mode, packet
+injection, or anything needing a custom kernel.
+
+Nothing here touches the system partition or trips Knox. Factory reset undoes
+all of it.
+
+## 1. Repos
+
+Install F-Droid, then add IzzyOnDroid:
+
+```
+https://apt.izzysoft.de/fdroid/repo
+```
+
+Or open `apt.izzysoft.de/fdroid/` in a browser and use the add-repo link,
+which passes the signing fingerprint along with the URL.
+
+Obtainium is also worth having. Installs from GitHub releases directly.
+
+**If you search and don't find these apps:** F-Droid hides anti-feature apps
+by default and all three tools here have flags. Shizuku is `UpstreamNonFree`,
+Canta is `NonFreeDep` and `NonFreeNet`. Settings → Anti-Features → enable
+them.
+
+## 2. Shizuku
+
+F-Droid → Shizuku. Check the app page under Links → Source Code says
+`github.com/RikkaApps/Shizuku` before installing.
+
+Don't open it yet.
+
+## 3. Wireless debugging
+
+Settings → About phone → Software information → tap Build number 7 times.
+
+Then Developer options → Wireless debugging → on.
+
+Leave USB debugging off. Nothing here needs it.
+
+## 4. Pairing
+
+The pairing code times out, so read this before you start.
+
+1. Shizuku → Pairing. A notification appears asking for a code.
+2. Developer options → Wireless debugging → Pair device with pairing code.
+3. Type the six digits into the Shizuku notification.
+4. Back in Shizuku, hit Start.
+
+Should say "Shizuku is running."
+
+No notification appears → Settings → Apps → Shizuku → Notifications, allow
+them.
+
+Pairs but won't start → toggle wireless debugging off and on. You have to be
+on WiFi.
+
+Dies on its own → Settings → Apps → Shizuku → Battery → Unrestricted. One UI
+kills background services aggressively.
+
+**Reboots.** Docs say Shizuku stops on reboot unless you're rooted. Mine
+didn't — it came back on its own, apparently the Android 13+ trusted-WiFi
+auto-start. Test yours instead of assuming.
+
+If yours doesn't survive and you care, there's a one-time USB grant:
+
+```bash
+adb shell pm grant moe.shizuku.privileged.api android.permission.WRITE_SECURE_SETTINGS
+```
+
+People report mixed results on whether it sticks. I didn't need it.
+
+## 5. Shell app
+
+Install **aShell You** (`in.hridayan.ashell`, DP-Hridayan). IzzyOnDroid or
+Obtainium.
+
+Two things I got wrong first:
+
+**LADB doesn't work with Shizuku.** Its README says so outright — they fight
+over the same wireless debugging socket. Repo's archived anyway. Most guides
+still recommend it.
+
+**aShell and aShell You are different apps.** aShell is sunilpaulmathew,
+aShell You is DP-Hridayan and is a fork with more backends and more recent
+updates. Neither is malicious, but check which one you're installing.
+
+On first launch pick **Local ADB**, not "ADB via Wireless Debugging." The
+second one makes aShell You pair its own connection and you end up in the
+same socket fight as LADB.
+
+## 6. Verify
+
+```
+whoami
+```
+
+`shell` means it worked. Anything like `u0_a783` is the app's own UID and
+means Shizuku didn't authorize it.
+
+I got the UID first. Force stopping aShell You and reopening it fixed it —
+apparently it can launch before Shizuku's service is ready and give up
+silently. If that doesn't work, clear its data and let it run setup again.
+
+Shizuku's "Authorized applications" counter said 0 the entire time, including
+after everything was working. Ignore it.
+
+## 7. The user 150 error
+
+Run this before removing anything:
+
+```
+pm list packages | grep facebook
+```
+
+You'll probably get your results plus:
+
+```
+Error: java.lang.SecurityException: Shell does not have permission
+to access user 150
+```
+
+Nothing's broken. `pm list packages` walks every user profile on the device.
+User 0 is you, user 150 is a Knox container — Secure Folder or a work
+profile. Shell can't see into it, which is the point of Knox.
+
+Scope your commands and it goes away:
+
+```
+pm list packages --user 0 | grep facebook
+```
+
+Use `--user 0` on everything from here.
+
+## 8. Canta
+
+Install Canta (`io.github.samolego.canta`, samolego). In both F-Droid and
+IzzyOnDroid.
+
+It pulls badges from the Universal Debloat List, which is a maintained
+database of what's safe to pull and what breaks. The badges are the reason to
+use Canta over doing this by hand.
+
+Removal is `pm uninstall --user 0` — the package goes away for your user, the
+APK stays in the read-only system partition. Factory reset restores it.
+
+**Leave "reset to factory version" unchecked.** That rolls an updated system
+app back to its shipped version instead of removing it. Different thing.
+
+## 9. What to remove
+
+Three conditions, all of them: Canta badges it Recommended, you know what it
+is, and you don't use it.
+
+The badge handles dependencies you can't check yourself. You handle whether
+you actually use the thing. Removing something you use is a ten-second
+reinstall. Removing something with a dependency you didn't know about is the
+one that hurts.
+
+### Don't touch
+
+Anything with Knox in the name. `com.sec.spp.push` — Samsung Push Service,
+kills notifications for every Samsung app. One UI Home, which is your
+launcher fallback. Samsung Account.
+`com.samsung.android.bixby.service` — other stuff depends on it, though
+`bixby.agent` and `bixby.wakeup` are both fine to remove. SmartThings if you
+have Samsung devices paired. Anything `com.android.*` or `com.sec.android.*`
+you can't identify.
+
+### Safe on my device
+
+Check badges on yours, carrier and region change what ships.
+
+```
+com.facebook.appmanager
+com.facebook.services
+com.facebook.system
+com.facebook.orca
+com.facebook.katana
+
+com.google.android.adservices.api    # Privacy Sandbox / Topics API
+com.google.android.apps.tachyon      # Meet
+
+com.samsung.android.app.spage        # Samsung Free
+com.samsung.android.app.dailyboard
+com.samsung.sree                     # Global Goals
+com.samsung.android.app.tips
+com.samsung.android.service.peoplestripe
+com.samsung.android.bixby.agent
+com.samsung.android.bixby.wakeup
+com.samsung.android.aremoji
+com.samsung.android.aremojieditor
+com.samsung.android.arzone
+```
+
+The Facebook packages are preinstalled whether or not you ever install
+Facebook.
+
+LinkedIn, Netflix, Spotify, Office, Amazon are all removable if you don't use
+them. They ship as stubs that pull the real app from Play when tapped, so if
+you use them you already installed over the stub.
+
+Two I kept. `com.google.android.gms.supervision` is a GMS internal and those
+tend to come back on Play system updates, plus if it breaks something you
+won't notice for weeks. And AR Emoji / AR Zone, because I use the camera
+modes — if you remove `aremoji` but keep `arzone` you get a button that
+errors, so do both or neither.
+
+### Batches
+
+Five to ten at a time, then reboot and check the phone still works. Short
+suspect list if something breaks.
+
+Canta's README puts the actual risk plainly: remove something critical and
+you can bootloop into a factory reset. `install-existing` doesn't help on a
+phone that won't boot.
+
+### The list lies sometimes
+
+After I pulled the Facebook packages Canta still showed `com.facebook.orca`.
+Checked in the shell, nothing there. It had worked, the list was just cached.
+Verify in the shell when something looks off.
+
+## 10. Cleanup
+
+Reboot. Check the phone boots, notifications come through, camera opens, and
+run `whoami` to see if Shizuku survived.
+
+When you're done for the session: Shizuku → menu → Stop, and turn wireless
+debugging back off. It's not that an idle Shizuku is dangerous — only
+authorized apps can reach it — but there's no reason to leave a privileged
+service running when nothing's using it.
+
+Anything you grant Shizuku access to can run commands as `shell`. Grant it
+like you'd grant a root terminal.
+
+### Where to stop
+
+Most of the benefit is the first ten or fifteen packages. Past that you're
+chasing a few hundred MB against a real chance of a subtle bug you won't
+trace back here.
+
+Some things fail loudly — pull Samsung Push Service and you'll know within an
+hour. Ad frameworks and GMS internals fail quietly, and you find out three
+weeks later when something unrelated acts up.
+
+## FAQ
+
+**Voids warranty / trips Knox?** No.
+
+**Will removed apps come back?** GMS components do, on Play system updates.
+Samsung apps can come back on firmware updates. Re-remove them.
+
+**Pixel / OnePlus / Xiaomi?** Shizuku part works, package lists don't. Use
+Canta's badges.
+
+**Need a computer?** No. The USB grant in step 4 is optional and most people
+won't need it.
+
+**Bootloop?** Factory reset. Everything comes back.
+
+**Is this root?** No. Shell is uid 2000, root is uid 0.
+
+## Commands
+
+```bash
+whoami                                    # want: shell
+pm list packages --user 0
+pm list packages --user 0 | grep <term>
+pm list packages -d --user 0              # removed/disabled
+pm uninstall --user 0 <package>
+cmd package install-existing <package>    # undo
+logcat
+```
+
+## Tools
+
+- Shizuku — `moe.shizuku.privileged.api` — [RikkaApps/Shizuku](https://github.com/RikkaApps/Shizuku)
+- aShell You — `in.hridayan.ashell` — [DP-Hridayan/aShellYou](https://github.com/DP-Hridayan/aShellYou)
+- Canta — `io.github.samolego.canta` — [samolego/Canta](https://github.com/samolego/Canta)
+- Obtainium — `dev.imranr.obtainium` — [ImranR98/Obtainium](https://github.com/ImranR98/Obtainium)
+
+Package data comes from [Universal Android Debloater NG](https://github.com/Universal-Debloater-Alliance/universal-android-debloater-next-generation).
+
+---
+
+Done on a Z Fold 8, One UI, stock. Your device will differ. Issues welcome if
+something here is wrong.
